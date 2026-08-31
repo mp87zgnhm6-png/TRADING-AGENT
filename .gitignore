@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# secrets
+.env
+
+# runtime data (db, model checkpoints, logs, backtests)
+data/*.db
+data/*.pkl
+data/*.json
+data/logs/*
+data/backtests/*
+!data/logs/.gitkeep
+!data/backtests/.gitkeep
+data/STOP
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

@@ -1,0 +1,11 @@
+alpaca-py>=0.33,<1.0
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0
+river>=0.21,<1.0
+pydantic>=2.6,<3.0
+pydantic-settings>=2.2,<3.0
+python-dotenv>=1.0,<2.0
+tzdata>=2024.1
+
+# dev / tests
+pytest>=8.0,<9.0
