@@ -249,6 +249,23 @@ class Storage:
                 ),
             )
 
+    def get_recent_signals(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM signals ORDER BY id DESC LIMIT ?", (limit,))
+            rows = cur.fetchall()
+        return [
+            {
+                "id": r["id"],
+                "timestamp": r["timestamp"],
+                "symbol": r["symbol"],
+                "strategy_name": r["strategy_name"],
+                "direction": r["direction"],
+                "confidence": r["confidence"],
+                "acted": bool(r["acted"]),
+            }
+            for r in rows
+        ]
+
     # -------------------------------------------------------------- equity
     def record_equity(self, equity: float, cash: float, buying_power: float) -> None:
         with self._cursor() as cur:
@@ -277,6 +294,15 @@ class Storage:
             )
             row = cur.fetchone()
             return row["equity"] if row else None
+
+    def get_equity_curve(self, limit: int = 500) -> list[dict[str, Any]]:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT timestamp, equity, cash, buying_power FROM equity_curve ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            rows = cur.fetchall()
+        return [dict(r) for r in reversed(rows)]  # chronologicky (nejstarsi prvni)
 
     def get_daily_pnl(self, day_start_iso: str) -> float:
         """Realizovany PnL z obchodu uzavrenych od zacatku dnesniho obchodniho dne."""

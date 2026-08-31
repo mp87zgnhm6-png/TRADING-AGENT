@@ -13,6 +13,7 @@ from typing import Optional
 from alpaca.trading.enums import OrderSide
 
 from trading_agent.broker.alpaca_client import AlpacaBroker
+from trading_agent.config import Settings
 from trading_agent.data.storage import Storage
 from trading_agent.logging_setup import get_logger
 
@@ -20,10 +21,16 @@ logger = get_logger("execution")
 
 
 class OrderManager:
-    def __init__(self, broker: AlpacaBroker, storage: Storage, dry_run: bool = False):
+    def __init__(self, broker: AlpacaBroker, storage: Storage, settings: Settings):
         self.broker = broker
         self.storage = storage
-        self.dry_run = dry_run
+        self.settings = settings
+
+    @property
+    def dry_run(self) -> bool:
+        # cteno primo z (sdileneho) Settings objektu, aby prepnuti DRY_RUN
+        # z webove dashboardu zabralo okamzite, bez restartu agenta
+        return self.settings.dry_run
 
     def enter_position(
         self,

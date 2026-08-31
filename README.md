@@ -53,10 +53,17 @@ trading_agent/
 │   └── signal_engine.py       spoji model+pravidla+bandit do 1 signalu
 ├── risk/risk_manager.py    position sizing, stop/take-profit, limity
 ├── execution/order_manager.py  bracket ordery, reconciliace s Alpaca
-└── backtest/backtester.py  event-driven walk-forward backtest
+├── backtest/backtester.py  event-driven walk-forward backtest
+├── events.py               in-process pub/sub (agent -> dashboard)
+└── webapp/
+    ├── server.py            FastAPI: REST API + WebSocket, bearer-token auth
+    ├── supervisor.py        start/stop/restart agenta z dashboardu
+    ├── settings_api.py      popis nastaveni pro formular (hot vs. restart)
+    └── static/index.html    dashboard (jedna stranka, bez build kroku)
 
 scripts/
-├── run_live.py       spusti agenta (paper i live, dle .env)
+├── run_web.py        agent + webovy dashboard (doporucene spousteni)
+├── run_live.py       jen agent, bez webu (headless provoz)
 ├── run_backtest.py   backtest nad historickymi daty
 └── bootstrap_train.py "zahrivaci" beh - predtrenuje model/bandit pred prvnim startem
 ```
@@ -78,6 +85,47 @@ scripts/
 4. Hlavni vlakno bezi nezavisle periodickou udrzbu: casove exity, detekci
    pozic uzavrenych primo Alpaca (SL/TP) a zpetnou vazbu do banditu, a
    periodicke ukladani stavu na disk.
+5. Kazdy podstatny krok (signal, otevreni/uzavreni pozice, heartbeat, zmena
+   stavu agenta) se publikuje do `EventBus` a websocketem tece rovnou do
+   dashboardu.
+
+## Webove rozhrani (dashboard)
+
+```bash
+python scripts/run_web.py          # agent + dashboard na http://127.0.0.1:8000/
+```
+
+Pri startu se do konzole vypise **pristupovy token** - ten se zadava pri prvnim
+otevreni dashboardu (ulozi se do prohlizece). Agent i webovy server bezi ve
+**stejnem procesu**, takze dashboard zobrazuje presne ten stav, se kterym agent
+prave pracuje, a zmeny nastaveni se propisou okamzite bez mezikroku.
+
+Co dashboard umi:
+
+- **Zive sledovani** - stav agenta, equity/hotovost/kupni sila, graf vyvoje
+  equity (vcetne tabulkoveho zobrazeni), otevrene pozice s aktualnim P/L,
+  historie uzavrenych obchodu a signalu, kvalita modelu (rolling ROC AUC) a
+  naucene vahy jednotlivych strategii z banditu.
+- **Zivy prubeh** - websocketovy proud udalosti (signaly, otevrene/uzavrene
+  pozice, heartbeaty) tak, jak je agent generuje.
+- **Kompletni nastaveni** - vsechny parametry z `.env` jde upravit primo v
+  rozhrani. Risk limity, `MIN_CONFIDENCE`, `DRY_RUN` apod. se v bezicim
+  agentovi projevi **okamzite**; polozky oznacene `RESTART` (API klice,
+  symboly, timeframe, predikcni horizont, data feed) vyzaduji tlacitko
+  *Ulozit a restartovat agenta*. Vse se uklada do `data/runtime_settings.json`
+  a prezije restart procesu (soubor je v `.gitignore`, stejne jako `.env`).
+- **Ovladani** - start / stop / restart agenta, prepnuti kill-switche, zavreni
+  jedne nebo vsech pozic (destruktivni akce maji potvrzovaci dialog).
+
+### Bezpecnost dashboardu
+
+Rozhrani umi menit risk limity a zavirat pozice na skutecnem uctu, proto:
+
+- **Vychozi vazba je `127.0.0.1`** (`WEB_HOST`) - zvenci nedostupne.
+- **Vsechny `/api/*` endpointy i websocket vyzaduji token** (`WEB_API_TOKEN`).
+  Kdyz je prazdny, vygeneruje se pri prvnim startu nahodny a ulozi se.
+- Pokud dashboard vystavite mimo localhost, postavte pred nej **HTTPS reverse
+  proxy** a token drzte v tajnosti (skript na to pri startu upozorni).
 
 ## Bezpecnostni mechanismy
 
@@ -122,7 +170,9 @@ python scripts/run_backtest.py --days 90
 #    aby agent nezacinal uplne od nuly
 python scripts/bootstrap_train.py --days 90
 
-# 3) spustit agenta (dle .env bezi na paper, nebo live pri explicitnim potvrzeni)
+# 3) spustit agenta s webovym dashboardem (doporucene)
+python scripts/run_web.py
+#    ...nebo bez webu, ciste headless:
 python scripts/run_live.py
 ```
 
@@ -146,6 +196,10 @@ Vsechny parametry jsou v `.env` (vzor v `.env.example`), mimo jine:
 | `MIN_CONFIDENCE` | minimalni jistota signalu pro vstup |
 | `ALLOW_SHORT` | povolit short prodeje |
 | `DRY_RUN` | simulace bez skutecneho odesilani orderu |
+| `WEB_HOST` / `WEB_PORT` | adresa a port dashboardu |
+| `WEB_API_TOKEN` | pristupovy token do dashboardu (prazdny = vygeneruje se) |
+
+Vetsinu z nich lze menit i za behu primo v dashboardu (zalozka *Nastaveni*).
 
 ## Testovani
 
@@ -155,11 +209,12 @@ pytest -v
 
 Testy pokryvaji vsechnu cistou logiku bez potreby sitoveho pripojeni k Alpaca
 (indikatory, risk management, bandit, online model, pravidlove strategie,
-storage, order manager s fake brokerem a cely backtester). Kod komunikujici
-primo s Alpaca API (`broker/alpaca_client.py`, plny beh `agent.run()`) neni
-pokryt automatizovanymi testy, protoze vyzaduje skutecne API klice a sitovy
-pristup - overte ho rucne pres `scripts/run_backtest.py` (stahuje realna
-historicka data) a nasledne kratkym behem na paper uctu.
+storage, order manager s fake brokerem, backtester, a webove API vcetne
+autentizace, validace nastaveni a websocketu). Kod komunikujici primo s Alpaca
+API (`broker/alpaca_client.py`, plny beh `agent.run()`) neni pokryt
+automatizovanymi testy, protoze vyzaduje skutecne API klice a sitovy pristup -
+overte ho rucne pres `scripts/run_backtest.py` (stahuje realna historicka data)
+a nasledne kratkym behem na paper uctu.
 
 ## Zname limity
 

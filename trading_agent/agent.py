@@ -27,6 +27,7 @@ from trading_agent.broker.alpaca_client import AlpacaBroker
 from trading_agent.config import Settings
 from trading_agent.data.bar_buffer import MultiSymbolBarStore
 from trading_agent.data.storage import Storage
+from trading_agent.events import EventBus
 from trading_agent.execution.order_manager import OrderManager
 from trading_agent.features.indicators import build_feature_row
 from trading_agent.logging_setup import get_logger
@@ -41,8 +42,9 @@ HEARTBEAT_INTERVAL_SECONDS = 300
 
 
 class AutonomousTradingAgent:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, event_bus: Optional[EventBus] = None):
         self.settings = settings
+        self.events = event_bus or EventBus()
         self.broker = AlpacaBroker(settings)
         self.storage = Storage(settings.db_path)
         self.bar_store = MultiSymbolBarStore(settings.symbols, maxlen=settings.bar_lookback)
@@ -50,7 +52,7 @@ class AutonomousTradingAgent:
         self.bandit = EpsilonGreedyBandit.load_or_create(settings.bandit_path, ALL_ARMS)
         self.signal_engine = SignalEngine(self.model, self.bandit)
         self.risk = RiskManager(settings, self.storage)
-        self.orders = OrderManager(self.broker, self.storage, dry_run=settings.dry_run)
+        self.orders = OrderManager(self.broker, self.storage, settings)
         self.label_queue = LabelQueue(settings.prediction_horizon_bars)
 
         self._lock = threading.RLock()
@@ -125,6 +127,17 @@ class AutonomousTradingAgent:
         self.storage.record_signal(
             symbol, signal.strategy_used, signal.direction, signal.confidence, acted=acted, features=feat
         )
+        self.events.publish(
+            {
+                "type": "signal",
+                "symbol": symbol,
+                "direction": signal.direction,
+                "confidence": round(signal.confidence, 4),
+                "strategy": signal.strategy_used,
+                "acted": acted,
+                "price": close_price,
+            }
+        )
 
     def _try_enter(self, symbol: str, signal, close_price: float, feat_row) -> bool:
         try:
@@ -146,10 +159,25 @@ class AutonomousTradingAgent:
             return False
 
         stop_price, take_profit_price = self.risk.stop_and_take_profit(close_price, atr_value, signal.direction)
-        return self.orders.enter_position(
+        entered = self.orders.enter_position(
             symbol, signal.direction, qty, close_price, stop_price, take_profit_price,
             signal.strategy_used, signal.confidence,
         )
+        if entered:
+            self.events.publish(
+                {
+                    "type": "trade_opened",
+                    "symbol": symbol,
+                    "side": "buy" if signal.direction > 0 else "sell",
+                    "qty": qty,
+                    "price": close_price,
+                    "stop_price": stop_price,
+                    "take_profit_price": take_profit_price,
+                    "strategy": signal.strategy_used,
+                    "confidence": round(signal.confidence, 4),
+                }
+            )
+        return entered
 
     # --------------------------------------------------------- udrzba
     def _check_time_based_exits(self) -> None:
@@ -164,7 +192,17 @@ class AutonomousTradingAgent:
             exit_price = self._last_known_price(trade.symbol) or trade.entry_price
             result = self.orders.exit_position(trade.symbol, exit_price, "max_hold_time")
             if result:
-                self.bandit.update(result[0], result[1])
+                strategy_name, pnl_pct = result
+                self.bandit.update(strategy_name, pnl_pct)
+                self.events.publish(
+                    {
+                        "type": "trade_closed",
+                        "symbol": trade.symbol,
+                        "strategy": strategy_name,
+                        "pnl_pct": round(pnl_pct, 4),
+                        "reason": "max_hold_time",
+                    }
+                )
 
     def _reconcile_closed_positions(self) -> None:
         """Detekuje pozice, ktere mezitim uzavrel bracket order primo na Alpaca
@@ -190,6 +228,16 @@ class AutonomousTradingAgent:
                     "Reconciliace: %s uzavren brokerem (strat=%s), PnL=%.2f (%.2f%%)",
                     trade.symbol, closed.strategy_name, closed.pnl, (closed.pnl_pct or 0.0) * 100,
                 )
+                self.events.publish(
+                    {
+                        "type": "trade_closed",
+                        "symbol": trade.symbol,
+                        "strategy": closed.strategy_name,
+                        "pnl": closed.pnl,
+                        "pnl_pct": round(closed.pnl_pct or 0.0, 4),
+                        "reason": "closed_by_broker",
+                    }
+                )
 
     def _maybe_persist(self) -> None:
         if time.monotonic() - self._last_persist < self.settings.persist_interval_minutes * 60:
@@ -205,10 +253,22 @@ class AutonomousTradingAgent:
             account = self.broker.get_account()
             equity = float(account.equity)
             self.storage.record_equity(equity, float(account.cash), float(account.buying_power))
+            open_positions = len(self.storage.get_all_open_trades())
             logger.info(
                 "Heartbeat: equity=%.2f otevrene=%d model_auc=%.3f (n=%d) bandit=%s",
-                equity, len(self.storage.get_all_open_trades()), self.model.rolling_score(),
-                self.model.n_samples, self.bandit.stats(),
+                equity, open_positions, self.model.rolling_score(), self.model.n_samples, self.bandit.stats(),
+            )
+            self.events.publish(
+                {
+                    "type": "heartbeat",
+                    "equity": equity,
+                    "cash": float(account.cash),
+                    "buying_power": float(account.buying_power),
+                    "open_positions": open_positions,
+                    "model_auc": round(self.model.rolling_score(), 4),
+                    "model_samples": self.model.n_samples,
+                    "bandit": self.bandit.stats(),
+                }
             )
         except Exception as exc:
             logger.error("Heartbeat selhal: %s", exc)
@@ -239,7 +299,45 @@ class AutonomousTradingAgent:
         logger.info("Prijat signal %s, zahajuji bezpecne zastaveni...", signum)
         self._stop_event.set()
 
-    def run(self) -> None:
+    def request_stop(self) -> None:
+        """Verejne, thread-safe pozadani o zastaveni - pouziva webovy dashboard
+        (kde agent bezi na pozadi ve vlastnim vlakne a signal handlery tedy nejdou
+        pouzit - ty smi byt instalovany jen v hlavnim vlakne procesu)."""
+        self._stop_event.set()
+
+    def manual_close_position(self, symbol: str, reason: str = "manual_web_ui") -> bool:
+        """Rucni uzavreni jedne pozice - vyvolane z dashboardu."""
+        with self._lock:
+            position = self.broker.get_position(symbol)
+            price = float(position.current_price) if position is not None else self._last_known_price(symbol)
+            if price is None:
+                logger.warning("Rucni zavreni %s: neznama aktualni cena, zrusen.", symbol)
+                return False
+            result = self.orders.exit_position(symbol, price, reason)
+            if result is None:
+                return False
+            strategy_name, pnl_pct = result
+            self.bandit.update(strategy_name, pnl_pct)
+            self.events.publish(
+                {"type": "trade_closed", "symbol": symbol, "strategy": strategy_name,
+                 "pnl_pct": round(pnl_pct, 4), "reason": reason}
+            )
+            return True
+
+    def manual_close_all(self, reason: str = "manual_web_ui") -> int:
+        """Rucni uzavreni vsech otevrenych pozic - vyvolane z dashboardu (napr. kill-switch)."""
+        with self._lock:
+            symbols = [t.symbol for t in self.storage.get_all_open_trades()]
+            closed = 0
+            for symbol in symbols:
+                if self.manual_close_position(symbol, reason=reason):
+                    closed += 1
+            return closed
+
+    def run(self, install_signal_handlers: bool = True) -> None:
+        """Spusti agenta. `install_signal_handlers=False` kdyz agent bezi ve
+        vlastnim (ne hlavnim) vlakne - typicky kdyz ho ridi webovy dashboard;
+        Python dovoluje registrovat signal handlery jen z hlavniho vlakna."""
         self.settings.ensure_directories()
         if not self.settings.live_trading_confirmed():
             raise RuntimeError(
@@ -251,6 +349,7 @@ class AutonomousTradingAgent:
             "Spoustim autonomniho tradingbota (%s, dry_run=%s, symboly=%s)",
             "PAPER" if self.settings.alpaca_paper else "LIVE", self.settings.dry_run, self.settings.symbols,
         )
+        self._stop_event.clear()
         self._log_account()
         self.orders.sync_open_positions()
         self._seed_history()
@@ -260,9 +359,11 @@ class AutonomousTradingAgent:
         self._stream_thread = threading.Thread(target=self._run_stream, name="alpaca-stream", daemon=True)
         self._stream_thread.start()
 
-        signal.signal(signal.SIGTERM, self._handle_signal)
-        signal.signal(signal.SIGINT, self._handle_signal)
+        if install_signal_handlers:
+            signal.signal(signal.SIGTERM, self._handle_signal)
+            signal.signal(signal.SIGINT, self._handle_signal)
 
+        self.events.publish({"type": "agent_status", "status": "started", "mode": "PAPER" if self.settings.alpaca_paper else "LIVE"})
         logger.info("Agent bezi. Pro bezpecne zastaveni stisknete Ctrl+C.")
         try:
             self._maintenance_loop()
@@ -285,4 +386,5 @@ class AutonomousTradingAgent:
             self.model.save(self.settings.model_path)
             self.bandit.save(self.settings.bandit_path)
         self.storage.close()
+        self.events.publish({"type": "agent_status", "status": "stopped"})
         logger.info("Agent bezpecne zastaven, stav modelu/banditu ulozen.")

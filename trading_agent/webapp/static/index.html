@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alpaca Trading Agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M6 22 L13 14 L18 19 L26 9' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light;
+    --page:           #f9f9f7;
+    --surface:        #fcfcfb;
+    --surface-2:      #f2f2ef;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --axis:           #c3c2b7;
+    --border:         rgba(11, 11, 11, 0.10);
+    --series-1:       #2a78d6;
+    --series-neg:     #e34948;
+    --text-pos:       #006300;
+    --text-neg:       #d03b3b;
+    --status-good:    #0ca30c;
+    --status-warning: #fab219;
+    --status-critical:#d03b3b;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page:           #0d0d0d;
+      --surface:        #1a1a19;
+      --surface-2:      #232322;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --axis:           #383835;
+      --border:         rgba(255, 255, 255, 0.10);
+      --series-1:       #3987e5;
+      --series-neg:     #e66767;
+      --text-pos:       #0ca30c;
+      --text-neg:       #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:           #0d0d0d;
+    --surface:        #1a1a19;
+    --surface-2:      #232322;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255, 255, 255, 0.10);
+    --series-1:       #3987e5;
+    --series-neg:     #e66767;
+    --text-pos:       #0ca30c;
+    --text-neg:       #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1, h2, h3 { margin: 0; font-weight: 600; }
+  h2 { font-size: 15px; }
+  h3 { font-size: 13px; color: var(--text-secondary); }
+  button { font: inherit; cursor: pointer; }
+  a { color: var(--series-1); }
+
+  /* ---------- layout ---------- */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+  }
+  .header-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .brand { font-size: 16px; font-weight: 600; margin-right: 4px; }
+  .spacer { flex: 1 1 auto; }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .grid { display: grid; gap: 16px; }
+  .grid > * { min-width: 0; }   /* bez tohoto se polozka gridu nezmensi pod sirku obsahu (tabulky) */
+  .cols-2 { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  @media (max-width: 980px) { .cols-2 { grid-template-columns: minmax(0, 1fr); } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    min-width: 0;
+  }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+
+  /* ---------- badges & buttons ---------- */
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px; border-radius: 999px;
+    font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-secondary);
+  }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .badge.good { color: var(--status-good); }
+  .badge.warn { color: var(--status-warning); }
+  .badge.crit { color: var(--status-critical); }
+
+  .btn {
+    padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-primary);
+  }
+  .btn:hover { background: var(--grid); }
+  .btn.primary { background: var(--series-1); border-color: transparent; color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--status-critical); }
+  .btn.small { padding: 3px 9px; font-size: 12px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    padding: 6px 12px; border-radius: 8px; border: 1px solid transparent;
+    background: transparent; color: var(--text-secondary); font-weight: 500;
+  }
+  .tab[aria-selected="true"] { background: var(--surface-2); border-color: var(--border); color: var(--text-primary); }
+
+  /* ---------- stat tiles ---------- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
+  .tile .label { font-size: 12px; color: var(--text-secondary); }
+  .tile .value { font-size: 22px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+  .tile.hero { grid-column: span 2; }
+  .tile.hero .value { font-size: 48px; line-height: 1.1; letter-spacing: -0.02em; }
+  .tile.hero .value.long { font-size: 34px; }
+  @media (max-width: 640px) { .tile.hero { grid-column: span 1; } .tile.hero .value { font-size: 34px; } }
+  .tile .sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .pos { color: var(--text-pos); }
+  .neg { color: var(--text-neg); }
+
+  /* ---------- chart ---------- */
+  .chart-wrap { position: relative; width: 100%; }
+  canvas { display: block; max-width: 100%; }
+  /* display:none (ne jen opacity) - skryty tooltip by jinak zustal v layoutu se
+     zastaralou pozici a po zmenseni okna by roztahoval stranku do sirky */
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 5; display: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 9px; font-size: 12px; white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,.12);
+  }
+  .tooltip.visible { display: block; }
+  .tooltip .tt-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ---------- tables ---------- */
+  .table-scroll { overflow-x: auto; max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+  td { font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 14px 2px; }
+
+  /* ---------- bandit bars ---------- */
+  .bandit-row { display: grid; grid-template-columns: 130px 1fr 76px; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .bandit-label { font-size: 13px; color: var(--text-secondary); }
+  .bandit-track { position: relative; height: 18px; background: var(--surface-2); border-radius: 3px; }
+  .bandit-zero { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--axis); }
+  .bandit-fill { position: absolute; top: 0; height: 18px; }
+  .bandit-value { font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ---------- activity feed ---------- */
+  .feed { max-height: 420px; overflow-y: auto; }
+  .feed-item { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-time { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: 0 0 62px; }
+  .feed-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .feed-tag { flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--text-muted); }
+
+  /* ---------- settings ---------- */
+  .settings-group { margin-bottom: 22px; }
+  .settings-group h3 { margin-bottom: 10px; }
+  .field { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--grid); }
+  .field:last-child { border-bottom: none; }
+  .field-label { font-size: 13px; }
+  .field-label .hint { display: block; font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+  .field input[type="text"], .field input[type="password"], .field input[type="number"] {
+    width: 100%; padding: 6px 9px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--page); color: var(--text-primary);
+    font: inherit; font-variant-numeric: tabular-nums;
+  }
+  .field input[type="checkbox"] { width: 18px; height: 18px; }
+  .cold-flag { font-size: 10px; font-weight: 700; color: var(--status-warning); letter-spacing: .03em; }
+
+  .notice { border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; border: 1px solid var(--border); background: var(--surface-2); }
+  .notice.live { border-color: var(--status-critical); color: var(--status-critical); font-weight: 600; }
+
+  /* ---------- token gate ---------- */
+  .gate { position: fixed; inset: 0; z-index: 100; background: var(--page); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .gate .card { width: 100%; max-width: 420px; }
+  .gate input { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); font: inherit; margin: 10px 0; }
+  .gate .err { color: var(--status-critical); font-size: 13px; min-height: 18px; }
+  [hidden] { display: none !important; }
+  .toast { position: fixed; right: 18px; bottom: 18px; z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 10px 14px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.16); max-width: 380px; }
+</style>
+</head>
+<body>
+
+<!-- ================= token gate ================= -->
+<div class="gate" id="gate" hidden>
+  <div class="card">
+    <h2>Prihlaseni do dashboardu</h2>
+    <p style="color:var(--text-secondary);font-size:13px">
+      Zadejte pristupovy token (<code>WEB_API_TOKEN</code>). Vypisuje se do konzole
+      pri startu <code>scripts/run_web.py</code>.
+    </p>
+    <input type="password" id="tokenInput" placeholder="pristupovy token" autocomplete="off">
+    <div class="err" id="tokenErr"></div>
+    <button class="btn primary" id="tokenSubmit" style="width:100%">Pripojit</button>
+  </div>
+</div>
+
+<!-- ================= header ================= -->
+<header hidden id="appHeader">
+  <div class="header-row">
+    <span class="brand">Alpaca Trading Agent</span>
+    <span class="badge" id="badgeRunning"><span class="dot"></span><span>nacitam…</span></span>
+    <span class="badge" id="badgeMode">–</span>
+    <span class="badge" id="badgeDryRun" hidden>DRY RUN</span>
+    <span class="badge crit" id="badgeKill" hidden><span class="dot"></span>KILL SWITCH</span>
+    <span class="badge" id="badgeWs"><span class="dot"></span><span>WS</span></span>
+    <span class="spacer"></span>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="overview" aria-selected="true">Prehled</button>
+      <button class="tab" role="tab" data-tab="history" aria-selected="false">Obchody a signaly</button>
+      <button class="tab" role="tab" data-tab="settings" aria-selected="false">Nastaveni</button>
+    </div>
+    <button class="btn small" id="themeToggle" title="Prepnout svetly/tmavy rezim">Tema</button>
+  </div>
+  <div class="header-row" style="margin-top:10px">
+    <button class="btn primary small" id="btnStart">Spustit agenta</button>
+    <button class="btn small" id="btnStop">Zastavit</button>
+    <button class="btn small" id="btnRestart">Restartovat</button>
+    <span style="width:8px"></span>
+    <button class="btn small" id="btnKill">Aktivovat kill-switch</button>
+    <button class="btn small danger" id="btnCloseAll">Zavrit vsechny pozice</button>
+  </div>
+</header>
+
+<main hidden id="app">
+
+  <!-- ================= OVERVIEW ================= -->
+  <section data-panel="overview">
+    <div class="notice live" id="liveWarning" hidden>
+      Pozor: agent je pripojen na OSTRY ucet (live) - obchoduje se skutecnymi penezi.
+    </div>
+    <div class="notice" id="statusNotice" hidden></div>
+
+    <div class="tiles" style="margin-bottom:16px">
+      <div class="tile hero">
+        <div class="label">Equity uctu</div>
+        <div class="value" id="tileEquity">–</div>
+        <div class="sub" id="tileEquitySub">&nbsp;</div>
+      </div>
+      <div class="tile">
+        <div class="label">Volna hotovost</div>
+        <div class="value" id="tileCash">–</div>
+      </div>
+      <div class="tile">
+        <div class="label">Kupni sila</div>
+        <div class="value" id="tileBuyingPower">–</div>
+      </div>
+      <div class="tile">
+        <div class="label">Otevrene pozice</div>
+        <div class="value" id="tilePositions">–</div>
+        <div class="sub" id="tilePositionsSub">&nbsp;</div>
+      </div>
+      <div class="tile">
+        <div class="label">Realizovany P/L (dnes)</div>
+        <div class="value" id="tileDayPnl">–</div>
+        <div class="sub" id="tileDayPnlSub">&nbsp;</div>
+      </div>
+      <div class="tile">
+        <div class="label">Kvalita modelu (ROC AUC)</div>
+        <div class="value" id="tileAuc">–</div>
+        <div class="sub" id="tileAucSub">&nbsp;</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head">
+        <h2>Vyvoj equity</h2>
+        <span class="spacer"></span>
+        <button class="btn small" id="btnEquityTable">Zobrazit jako tabulku</button>
+      </div>
+      <div class="chart-wrap" id="equityWrap">
+        <canvas id="equityCanvas" role="img" aria-label="Graf vyvoje equity uctu v case"></canvas>
+        <div class="tooltip" id="equityTooltip"></div>
+      </div>
+      <div class="table-scroll" id="equityTableWrap" hidden style="max-height:260px;overflow-y:auto">
+        <table><thead><tr><th>Cas</th><th>Equity</th><th>Hotovost</th></tr></thead>
+        <tbody id="equityTableBody"></tbody></table>
+      </div>
+      <div class="empty" id="equityEmpty" hidden>Zatim zadna data - equity se zaznamenava po spusteni agenta.</div>
+    </div>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="card-head"><h2>Otevrene pozice</h2></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr>
+              <th>Symbol</th><th>Smer</th><th>Ks</th><th>Vstup</th><th>Aktualni</th>
+              <th>P/L</th><th>Stop</th><th>Take-profit</th><th>Strategie</th><th></th>
+            </tr></thead>
+            <tbody id="positionsBody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="positionsEmpty">Zadne otevrene pozice.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Zivy prubeh</h2><span class="spacer"></span>
+          <span class="badge" id="feedCount">0</span>
+        </div>
+        <div class="feed" id="feed"></div>
+        <div class="empty" id="feedEmpty">Ceka se na udalosti agenta…</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-head">
+        <h2>Samouceni: vahy strategii (bandit)</h2>
+        <span class="spacer"></span>
+        <span class="badge" id="modelSamples">–</span>
+      </div>
+      <div id="banditBars"></div>
+      <div class="empty" id="banditEmpty">Statistiky budou dostupne po spusteni agenta.</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">
+        Hodnota = prumerne realizovane PnL % obchodu otevrenych danou strategii.
+        Agent postupne prideluje vice rozhodnuti strategii s nejlepsim vysledkem.
+      </p>
+    </div>
+  </section>
+
+  <!-- ================= HISTORY ================= -->
+  <section data-panel="history" hidden>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><h2>Uzavrene obchody</h2></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr>
+            <th>Symbol</th><th>Smer</th><th>Ks</th><th>Vstup</th><th>Vystup</th>
+            <th>P/L</th><th>P/L %</th><th>Duvod</th><th>Strategie</th><th>Uzavreno</th>
+          </tr></thead>
+          <tbody id="tradesBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="tradesEmpty">Zatim zadne uzavrene obchody.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Posledni signaly</h2></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr>
+            <th>Cas</th><th>Symbol</th><th>Strategie</th><th>Smer</th><th>Jistota</th><th>Obchodovano</th>
+          </tr></thead>
+          <tbody id="signalsBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="signalsEmpty">Zatim zadne signaly.</div>
+    </div>
+  </section>
+
+  <!-- ================= SETTINGS ================= -->
+  <section data-panel="settings" hidden>
+    <div class="notice">
+      Zmeny oznacene <span class="cold-flag">RESTART</span> se projevi az po kliknuti na
+      <strong>Ulozit a restartovat agenta</strong> (API klice, symboly, timeframe…).
+      Ostatni nastaveni (risk limity, jistota signalu, DRY RUN…) se v bezicim agentovi
+      projevi okamzite po ulozeni. Vse se uklada do <code>data/runtime_settings.json</code>
+      a prezije restart procesu.
+    </div>
+    <div class="card">
+      <form id="settingsForm"></form>
+      <div class="header-row" style="margin-top:16px">
+        <button class="btn primary" id="btnSaveSettings">Ulozit</button>
+        <button class="btn" id="btnSaveRestart">Ulozit a restartovat agenta</button>
+        <button class="btn" id="btnReloadSettings">Zahodit zmeny</button>
+        <span class="spacer"></span>
+        <span id="settingsMsg" style="font-size:13px;color:var(--text-secondary)"></span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+"use strict";
+
+/* ============================ stav ============================ */
+const state = {
+  token: localStorage.getItem("ta_token") || "",
+  status: null,
+  equity: [],
+  positions: [],
+  schema: null,
+  settings: null,
+  feed: [],
+  ws: null,
+  wsRetry: 0,
+  hoverIndex: null,
+};
+
+/* ============================ pomocne ============================ */
+const $ = (id) => document.getElementById(id);
+
+function fmtMoney(v, digits = 2) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "–";
+  return new Intl.NumberFormat("cs-CZ", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
+}
+function fmtPct(v, digits = 2) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "–";
+  return (v * 100).toFixed(digits) + " %";
+}
+function fmtTime(iso) {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "–" : d.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function fmtDateTime(iso) {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "–" : d.toLocaleString("cs-CZ", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function el(tag, opts = {}, children = []) {
+  const node = document.createElement(tag);
+  if (opts.text !== undefined) node.textContent = opts.text;   // vzdy textContent, nikdy innerHTML (data z API)
+  if (opts.cls) node.className = opts.cls;
+  if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, v);
+  for (const c of children) node.appendChild(c);
+  return node;
+}
+function td(text, cls) { return el("td", { text, cls }); }
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  const t = $("toast");
+  t.textContent = message;
+  t.style.color = isError ? "var(--status-critical)" : "var(--text-primary)";
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 4500);
+}
+
+/* ============================ API ============================ */
+async function api(path, options = {}) {
+  const res = await fetch("/api" + path, {
+    ...options,
+    headers: {
+      "Authorization": "Bearer " + state.token,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  if (res.status === 401) { showGate("Neplatny token."); throw new Error("unauthorized"); }
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const detail = data && data.detail;
+    const message = Array.isArray(detail)
+      ? detail.map((d) => `${d.field ?? ""}: ${d.message ?? ""}`).join("; ")
+      : (detail || res.statusText);
+    throw new Error(message);
+  }
+  return data;
+}
+
+/* ============================ token gate ============================ */
+function showGate(errMsg) {
+  $("gate").hidden = false;
+  $("appHeader").hidden = true;
+  $("app").hidden = true;
+  $("tokenErr").textContent = errMsg || "";
+}
+function hideGate() {
+  $("gate").hidden = true;
+  $("appHeader").hidden = false;
+  $("app").hidden = false;
+}
+$("tokenSubmit").addEventListener("click", async () => {
+  const value = $("tokenInput").value.trim();
+  if (!value) { $("tokenErr").textContent = "Zadejte token."; return; }
+  state.token = value;
+  try {
+    await api("/status");
+    localStorage.setItem("ta_token", value);
+    hideGate();
+    boot();
+  } catch (e) {
+    $("tokenErr").textContent = "Prihlaseni selhalo: " + e.message;
+  }
+});
+$("tokenInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("tokenSubmit").click(); });
+
+/* ============================ tema ============================ */
+function applyTheme(theme) {
+  if (theme) document.documentElement.setAttribute("data-theme", theme);
+  else document.documentElement.removeAttribute("data-theme");
+  drawEquityChart();
+}
+applyTheme(localStorage.getItem("ta_theme"));
+$("themeToggle").addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme");
+  const isDarkNow = current === "dark" || (!current && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const next = isDarkNow ? "light" : "dark";
+  localStorage.setItem("ta_theme", next);
+  applyTheme(next);
+});
+
+/* ============================ zalozky ============================ */
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
+    const name = tab.dataset.tab;
+    document.querySelectorAll("[data-panel]").forEach((p) => { p.hidden = p.dataset.panel !== name; });
+    if (name === "overview") drawEquityChart();
+    if (name === "history") { refreshTrades(); refreshSignals(); }
+  });
+});
+
+/* ============================ status & dlazdice ============================ */
+function renderStatus(s) {
+  state.status = s;
+  const running = !!s.running;
+
+  const badge = $("badgeRunning");
+  badge.className = "badge " + (running ? "good" : "warn");
+  badge.lastElementChild.textContent = running ? "BEZI" : "ZASTAVEN";
+
+  $("badgeMode").textContent = s.mode === "LIVE" ? "LIVE ucet" : "PAPER ucet";
+  $("badgeMode").className = "badge " + (s.mode === "LIVE" ? "crit" : "");
+  $("liveWarning").hidden = s.mode !== "LIVE";
+  $("badgeDryRun").hidden = !s.dry_run;
+  $("badgeKill").hidden = !s.kill_switch_active;
+  $("btnKill").textContent = s.kill_switch_active ? "Zrusit kill-switch" : "Aktivovat kill-switch";
+  $("btnStart").disabled = running;
+  $("btnStop").disabled = !running;
+
+  const notice = $("statusNotice");
+  const problems = [];
+  if (s.account_error) problems.push("Alpaca ucet nedostupny: " + s.account_error);
+  if (s.last_error) problems.push("Posledni chyba agenta: " + s.last_error);
+  if (s.kill_switch_active) problems.push("Kill-switch je aktivni - agent neotevira nove pozice.");
+  notice.hidden = problems.length === 0;
+  notice.textContent = problems.join("  |  ");
+
+  const equityText = s.equity !== undefined ? fmtMoney(s.equity) : "–";
+  const equityNode = $("tileEquity");
+  equityNode.textContent = equityText;
+  equityNode.classList.toggle("long", equityText.length > 11);   // velke ucty se nesmi orezat
+  $("tileEquitySub").textContent = s.portfolio_value !== undefined ? "portfolio " + fmtMoney(s.portfolio_value) : " ";
+  $("tileCash").textContent = s.cash !== undefined ? fmtMoney(s.cash) : "–";
+  $("tileBuyingPower").textContent = s.buying_power !== undefined ? fmtMoney(s.buying_power) : "–";
+  $("tileAuc").textContent = s.model_auc !== undefined ? s.model_auc.toFixed(3) : "–";
+  $("tileAucSub").textContent = s.model_samples !== undefined ? s.model_samples + " nauceni" : " ";
+  $("tilePositionsSub").textContent = (s.symbols || []).join(", ") || " ";
+}
+
+/* ============================ pozice ============================ */
+function renderPositions(list) {
+  state.positions = list;
+  const body = $("positionsBody");
+  body.replaceChildren();
+  $("positionsEmpty").hidden = list.length > 0;
+  $("tilePositions").textContent = String(list.length);
+
+  for (const p of list) {
+    const plClass = (p.unrealized_pl ?? 0) >= 0 ? "pos" : "neg";
+    const closeBtn = el("button", { cls: "btn small danger", text: "Zavrit" });
+    closeBtn.addEventListener("click", () => closePosition(p.symbol));
+    body.appendChild(el("tr", {}, [
+      td(p.symbol),
+      td(p.side === "long" ? "long" : "short"),
+      td(fmtMoney(p.qty, 0)),
+      td(fmtMoney(p.avg_entry_price)),
+      td(fmtMoney(p.current_price)),
+      td(
+        (p.unrealized_pl !== null ? fmtMoney(p.unrealized_pl) : "–") +
+        (p.unrealized_plpc !== null ? "  (" + fmtPct(p.unrealized_plpc) + ")" : ""),
+        plClass
+      ),
+      td(p.stop_price !== null ? fmtMoney(p.stop_price) : "–"),
+      td(p.take_profit_price !== null ? fmtMoney(p.take_profit_price) : "–"),
+      td(p.strategy || "–"),
+      el("td", {}, [closeBtn]),
+    ]));
+  }
+}
+
+/* ============================ obchody a signaly ============================ */
+function renderTrades(list) {
+  const body = $("tradesBody");
+  body.replaceChildren();
+  $("tradesEmpty").hidden = list.length > 0;
+
+  let todayPnl = 0;
+  const today = new Date().toDateString();
+  for (const t of list) {
+    if (t.exit_time && new Date(t.exit_time).toDateString() === today) todayPnl += t.pnl || 0;
+    const cls = (t.pnl ?? 0) >= 0 ? "pos" : "neg";
+    body.appendChild(el("tr", {}, [
+      td(t.symbol),
+      td(t.side),
+      td(fmtMoney(t.qty, 0)),
+      td(fmtMoney(t.entry_price)),
+      td(t.exit_price !== null ? fmtMoney(t.exit_price) : "–"),
+      td(t.pnl !== null ? fmtMoney(t.pnl) : "–", cls),
+      td(t.pnl_pct !== null ? fmtPct(t.pnl_pct) : "–", cls),
+      td(t.exit_reason || "–"),
+      td(t.strategy_name),
+      td(fmtDateTime(t.exit_time)),
+    ]));
+  }
+  $("tileDayPnl").textContent = fmtMoney(todayPnl);
+  $("tileDayPnl").className = "value " + (todayPnl >= 0 ? "pos" : "neg");
+  $("tileDayPnlSub").textContent = list.length + " uzavrenych celkem";
+}
+
+function renderSignals(list) {
+  const body = $("signalsBody");
+  body.replaceChildren();
+  $("signalsEmpty").hidden = list.length > 0;
+  for (const s of list) {
+    body.appendChild(el("tr", {}, [
+      td(fmtDateTime(s.timestamp)),
+      td(s.symbol),
+      td(s.strategy_name),
+      td(s.direction > 0 ? "nakup" : s.direction < 0 ? "prodej" : "drzet"),
+      td(s.confidence.toFixed(2)),
+      td(s.acted ? "ano" : "ne"),
+    ]));
+  }
+}
+
+/* ============================ model & bandit ============================ */
+function renderModelStats(stats) {
+  const wrap = $("banditBars");
+  wrap.replaceChildren();
+  if (!stats || !stats.available) {
+    $("banditEmpty").hidden = false;
+    $("modelSamples").textContent = "agent nebezi";
+    return;
+  }
+  $("banditEmpty").hidden = true;
+  $("modelSamples").textContent = `AUC ${stats.model_auc.toFixed(3)} · ${stats.model_samples} vzorku · epsilon ${stats.bandit.epsilon}`;
+
+  const values = stats.bandit.values || {};
+  const counts = stats.bandit.counts || {};
+  const maxAbs = Math.max(0.001, ...Object.values(values).map((v) => Math.abs(v)));
+
+  for (const [arm, value] of Object.entries(values)) {
+    const pct = (Math.abs(value) / maxAbs) * 50;   // 50 % = polovina stopy (od stredu)
+    const positive = value >= 0;
+    const fill = el("div", { cls: "bandit-fill" });
+    fill.style.background = positive ? "var(--series-1)" : "var(--series-neg)";
+    fill.style.width = pct + "%";
+    if (positive) { fill.style.left = "50%"; fill.style.borderRadius = "0 4px 4px 0"; }
+    else { fill.style.right = "50%"; fill.style.left = "auto"; fill.style.borderRadius = "4px 0 0 4px"; }
+
+    const track = el("div", { cls: "bandit-track" }, [el("div", { cls: "bandit-zero" }), fill]);
+    wrap.appendChild(el("div", { cls: "bandit-row" }, [
+      el("div", { cls: "bandit-label", text: `${arm} (${counts[arm] ?? 0}×)` }),
+      track,
+      el("div", { cls: "bandit-value " + (positive ? "pos" : "neg"), text: (value * 100).toFixed(2) + " %" }),
+    ]));
+  }
+}
+
+/* ============================ equity graf ============================ */
+function niceTicks(min, max, count) {
+  if (min === max) { min -= 1; max += 1; }
+  const rawStep = (max - min) / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const start = Math.ceil(min / step) * step;
+  const ticks = [];
+  for (let v = start; v <= max + step * 0.001; v += step) ticks.push(v);
+  return ticks;
+}
+
+function drawEquityChart() {
+  const canvas = $("equityCanvas");
+  if (!canvas || canvas.offsetParent === null) return;
+  const points = state.equity;
+  $("equityEmpty").hidden = points.length > 0;
+
+  const wrap = $("equityWrap");
+  const dpr = window.devicePixelRatio || 1;
+  // sirku nejdriv uvolnit, jinak by uz vykresleny (siroky) canvas branil kontejneru
+  // zmensit se a stranka by pretekala do strany
+  canvas.style.width = "100%";
+  const cssW = Math.max(wrap.clientWidth, 240);
+  const cssH = 280;                       // vcetne pasma pro popisky osy x
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  canvas.style.height = cssH + "px";
+
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  if (points.length === 0) return;
+
+  const css = getComputedStyle(document.documentElement);
+  const cSeries = css.getPropertyValue("--series-1").trim();
+  const cGrid = css.getPropertyValue("--grid").trim();
+  const cAxis = css.getPropertyValue("--axis").trim();
+  const cMuted = css.getPropertyValue("--text-muted").trim();
+  const cSurface = css.getPropertyValue("--surface").trim();
+
+  const padL = 68, padR = 16, padT = 12, padB = 28;
+  const plotW = cssW - padL - padR;
+  const plotH = cssH - padT - padB;
+
+  const values = points.map((p) => p.equity);
+  let vMin = Math.min(...values), vMax = Math.max(...values);
+  const span = (vMax - vMin) || Math.max(1, Math.abs(vMax) * 0.001);
+  vMin -= span * 0.08; vMax += span * 0.08;
+
+  const xAt = (i) => padL + (points.length === 1 ? plotW / 2 : (i / (points.length - 1)) * plotW);
+  const yAt = (v) => padT + plotH - ((v - vMin) / (vMax - vMin)) * plotH;
+
+  // gridlines + y osa (hairline, solid, recesivni)
+  ctx.font = "11px system-ui, -apple-system, 'Segoe UI', sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 1;
+  for (const tick of niceTicks(vMin, vMax, 4)) {
+    const y = Math.round(yAt(tick)) + 0.5;
+    ctx.strokeStyle = cGrid;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+    ctx.fillStyle = cMuted;
+    ctx.textAlign = "right";
+    ctx.fillText(new Intl.NumberFormat("cs-CZ", { maximumFractionDigits: 0 }).format(tick), padL - 8, y);
+  }
+
+  // x popisky (sporne - 4 body); krajni zarovnat dovnitr, aby se neurizly
+  ctx.fillStyle = cMuted;
+  const labelCount = Math.min(4, points.length);
+  for (let k = 0; k < labelCount; k++) {
+    const i = Math.round((k / Math.max(labelCount - 1, 1)) * (points.length - 1));
+    ctx.textAlign = k === 0 ? "left" : k === labelCount - 1 ? "right" : "center";
+    ctx.fillText(fmtTime(points[i].timestamp), xAt(i), padT + plotH + 14);
+  }
+
+  // baseline
+  ctx.strokeStyle = cAxis;
+  ctx.beginPath();
+  ctx.moveTo(padL, Math.round(padT + plotH) + 0.5);
+  ctx.lineTo(padL + plotW, Math.round(padT + plotH) + 0.5);
+  ctx.stroke();
+
+  // plocha pod krivkou (~10 % opacity)
+  ctx.beginPath();
+  ctx.moveTo(xAt(0), padT + plotH);
+  points.forEach((p, i) => ctx.lineTo(xAt(i), yAt(p.equity)));
+  ctx.lineTo(xAt(points.length - 1), padT + plotH);
+  ctx.closePath();
+  ctx.globalAlpha = 0.10;
+  ctx.fillStyle = cSeries;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // linie 2px, kulate spoje
+  ctx.beginPath();
+  points.forEach((p, i) => (i === 0 ? ctx.moveTo(xAt(i), yAt(p.equity)) : ctx.lineTo(xAt(i), yAt(p.equity))));
+  ctx.strokeStyle = cSeries;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.stroke();
+
+  // koncovy marker (>=8px) s 2px prstencem v barve podkladu
+  const lastX = xAt(points.length - 1), lastY = yAt(points[points.length - 1].equity);
+  ctx.beginPath(); ctx.arc(lastX, lastY, 6, 0, Math.PI * 2);
+  ctx.fillStyle = cSurface; ctx.fill();
+  ctx.beginPath(); ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+  ctx.fillStyle = cSeries; ctx.fill();
+
+  // krizovy kurzor pri hoveru
+  if (state.hoverIndex !== null && state.hoverIndex >= 0 && state.hoverIndex < points.length) {
+    const hx = xAt(state.hoverIndex), hy = yAt(points[state.hoverIndex].equity);
+    ctx.strokeStyle = cAxis;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(Math.round(hx) + 0.5, padT); ctx.lineTo(Math.round(hx) + 0.5, padT + plotH); ctx.stroke();
+    ctx.beginPath(); ctx.arc(hx, hy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = cSurface; ctx.fill();
+    ctx.beginPath(); ctx.arc(hx, hy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = cSeries; ctx.fill();
+  }
+
+  canvas._geometry = { padL, padR, padT, plotW, plotH, cssW, cssH };
+}
+
+$("equityCanvas").addEventListener("mousemove", (event) => {
+  const canvas = $("equityCanvas");
+  const geo = canvas._geometry;
+  if (!geo || state.equity.length === 0) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const ratio = (x - geo.padL) / geo.plotW;
+  const index = Math.max(0, Math.min(state.equity.length - 1, Math.round(ratio * (state.equity.length - 1))));
+  state.hoverIndex = index;
+  drawEquityChart();
+
+  const point = state.equity[index];
+  const tip = $("equityTooltip");
+  tip.replaceChildren(
+    el("div", { text: fmtDateTime(point.timestamp) }),
+    el("div", { cls: "tt-value", text: fmtMoney(point.equity) }),
+  );
+  tip.classList.add("visible");                     // az ted ma offsetWidth smysl
+  const tipX = Math.min(Math.max(x + 12, 8), Math.max(rect.width - tip.offsetWidth - 8, 8));
+  tip.style.left = tipX + "px";
+  tip.style.top = "12px";
+});
+$("equityCanvas").addEventListener("mouseleave", () => {
+  state.hoverIndex = null;
+  $("equityTooltip").classList.remove("visible");
+  drawEquityChart();
+});
+window.addEventListener("resize", () => drawEquityChart());
+
+$("btnEquityTable").addEventListener("click", () => {
+  const tableWrap = $("equityTableWrap");
+  const showTable = tableWrap.hidden;
+  tableWrap.hidden = !showTable;
+  $("equityWrap").hidden = showTable;
+  $("btnEquityTable").textContent = showTable ? "Zobrazit jako graf" : "Zobrazit jako tabulku";
+  if (!showTable) drawEquityChart();
+});
+
+function renderEquity(points) {
+  state.equity = points;
+  drawEquityChart();
+  const body = $("equityTableBody");
+  body.replaceChildren();
+  for (const p of points.slice().reverse()) {
+    body.appendChild(el("tr", {}, [
+      td(fmtDateTime(p.timestamp)),
+      td(fmtMoney(p.equity)),
+      td(fmtMoney(p.cash)),
+    ]));
+  }
+}
+
+/* ============================ zivy prubeh (websocket) ============================ */
+const EVENT_TEXT = {
+  signal: (e) => `${e.symbol}: ${e.direction > 0 ? "nakupni" : e.direction < 0 ? "prodejni" : "neutralni"} signal `
+    + `(${e.strategy}, jistota ${Number(e.confidence).toFixed(2)})${e.acted ? " - obchod otevren" : ""}`,
+  trade_opened: (e) => `${e.symbol}: otevrena pozice ${e.side} ${e.qty} ks @ ${fmtMoney(e.price)} `
+    + `(SL ${fmtMoney(e.stop_price)} / TP ${fmtMoney(e.take_profit_price)}, ${e.strategy})`,
+  trade_closed: (e) => `${e.symbol}: pozice uzavrena (${e.reason})`
+    + (e.pnl_pct !== undefined ? `, PnL ${(e.pnl_pct * 100).toFixed(2)} %` : ""),
+  heartbeat: (e) => `equity ${fmtMoney(e.equity)}, ${e.open_positions} otevrenych pozic, model AUC ${e.model_auc}`,
+  agent_status: (e) => `agent: ${e.status}${e.error ? " - " + e.error : ""}`,
+};
+
+function addFeedEvent(event) {
+  const build = EVENT_TEXT[event.type];
+  const text = build ? build(event) : JSON.stringify(event);
+  state.feed.unshift({ ts: event.ts, type: event.type, text });
+  state.feed = state.feed.slice(0, 200);
+
+  const feed = $("feed");
+  $("feedEmpty").hidden = true;
+  const item = el("div", { cls: "feed-item" }, [
+    el("span", { cls: "feed-time", text: fmtTime(event.ts) }),
+    el("span", { cls: "feed-text", text }),
+    el("span", { cls: "feed-tag", text: event.type }),
+  ]);
+  feed.insertBefore(item, feed.firstChild);
+  while (feed.childElementCount > 200) feed.removeChild(feed.lastChild);
+  $("feedCount").textContent = String(state.feed.length);
+}
+
+function connectWs() {
+  if (!state.token) return;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws?token=${encodeURIComponent(state.token)}`);
+  state.ws = ws;
+
+  ws.onopen = () => {
+    state.wsRetry = 0;
+    $("badgeWs").className = "badge good";
+    $("badgeWs").lastElementChild.textContent = "zive";
+  };
+  ws.onclose = () => {
+    $("badgeWs").className = "badge warn";
+    $("badgeWs").lastElementChild.textContent = "odpojeno";
+    state.wsRetry = Math.min(state.wsRetry + 1, 6);
+    setTimeout(connectWs, 1000 * state.wsRetry);       // exponencialni-ish opakovani
+  };
+  ws.onmessage = (msg) => {
+    let event;
+    try { event = JSON.parse(msg.data); } catch { return; }
+    addFeedEvent(event);
+    if (event.type === "trade_opened" || event.type === "trade_closed") {
+      refreshPositions(); refreshTrades(); refreshStatus();
+    } else if (event.type === "heartbeat") {
+      refreshStatus(); refreshEquity(); refreshModelStats();
+    } else if (event.type === "agent_status") {
+      refreshStatus(); refreshModelStats();
+    }
+  };
+}
+
+/* ============================ nastaveni ============================ */
+function renderSettingsForm(schema, values) {
+  const form = $("settingsForm");
+  form.replaceChildren();
+  for (const group of schema) {
+    const fields = group.fields.map((field) => {
+      const label = el("div", { cls: "field-label" }, [document.createTextNode(field.label)]);
+      if (!field.hot) label.appendChild(el("span", { cls: "hint" }, [el("span", { cls: "cold-flag", text: "RESTART" })]));
+      else label.appendChild(el("span", { cls: "hint", text: "projevi se okamzite" }));
+
+      let input;
+      if (field.type === "bool") {
+        input = el("input", { attrs: { type: "checkbox" } });
+        input.checked = !!values[field.name];
+      } else if (field.type === "int" || field.type === "float") {
+        input = el("input", { attrs: { type: "number", step: field.step ?? (field.type === "int" ? 1 : 0.01) } });
+        input.value = values[field.name];
+      } else if (field.type === "password") {
+        input = el("input", { attrs: { type: "password", placeholder: "beze zmeny" } });
+        input.value = "";
+        input.dataset.masked = "1";
+        input.setAttribute("autocomplete", "new-password");
+      } else {
+        input = el("input", { attrs: { type: "text" } });
+        input.value = values[field.name] ?? "";
+      }
+      input.dataset.field = field.name;
+      input.dataset.type = field.type;
+      return el("div", { cls: "field" }, [label, input]);
+    });
+    form.appendChild(el("div", { cls: "settings-group" }, [el("h3", { text: group.group }), ...fields]));
+  }
+}
+
+function collectSettingsUpdates() {
+  const updates = {};
+  for (const input of $("settingsForm").querySelectorAll("[data-field]")) {
+    const name = input.dataset.field;
+    const type = input.dataset.type;
+    if (type === "bool") updates[name] = input.checked;
+    else if (type === "int") updates[name] = parseInt(input.value, 10);
+    else if (type === "float") updates[name] = parseFloat(input.value);
+    else if (type === "password") { if (input.value !== "") updates[name] = input.value; }  // prazdne = ponechat
+    else updates[name] = input.value;
+  }
+  return updates;
+}
+
+async function saveSettings(alsoRestart) {
+  const msg = $("settingsMsg");
+  msg.textContent = "Ukladam…";
+  try {
+    state.settings = await api("/settings", { method: "POST", body: JSON.stringify(collectSettingsUpdates()) });
+    renderSettingsForm(state.schema, state.settings);
+    msg.textContent = "Ulozeno.";
+    toast("Nastaveni ulozeno.");
+    if (alsoRestart) {
+      msg.textContent = "Restartuji agenta…";
+      const result = await api("/control/restart", { method: "POST" });
+      msg.textContent = result.message;
+      toast(result.message, !result.ok);
+    }
+    refreshStatus();
+  } catch (e) {
+    msg.textContent = "Chyba: " + e.message;
+    toast("Ulozeni selhalo: " + e.message, true);
+  }
+}
+$("btnSaveSettings").addEventListener("click", (e) => { e.preventDefault(); saveSettings(false); });
+$("btnSaveRestart").addEventListener("click", (e) => { e.preventDefault(); saveSettings(true); });
+$("btnReloadSettings").addEventListener("click", async (e) => {
+  e.preventDefault();
+  await refreshSettings();
+  $("settingsMsg").textContent = "Nacteno z serveru.";
+});
+
+/* ============================ ovladani ============================ */
+async function control(path, confirmMessage) {
+  if (confirmMessage && !window.confirm(confirmMessage)) return;
+  try {
+    const result = await api(path, { method: "POST" });
+    toast(result.message || "Hotovo.", result.ok === false);
+    refreshStatus(); refreshPositions(); refreshModelStats();
+  } catch (e) {
+    toast("Chyba: " + e.message, true);
+  }
+}
+$("btnStart").addEventListener("click", () => control("/control/start"));
+$("btnStop").addEventListener("click", () => control("/control/stop", "Opravdu zastavit agenta? Otevrene pozice zustanou na burze chranene svymi SL/TP prikazy."));
+$("btnRestart").addEventListener("click", () => control("/control/restart", "Restartovat agenta a nacist aktualni nastaveni?"));
+$("btnKill").addEventListener("click", async () => {
+  const activate = !(state.status && state.status.kill_switch_active);
+  try {
+    await api("/control/kill_switch", { method: "POST", body: JSON.stringify({ active: activate }) });
+    toast(activate ? "Kill-switch aktivovan - agent neotevira nove pozice." : "Kill-switch zrusen.");
+    refreshStatus();
+  } catch (e) { toast("Chyba: " + e.message, true); }
+});
+$("btnCloseAll").addEventListener("click", async () => {
+  if (!window.confirm("Opravdu zavrit VSECHNY otevrene pozice za aktualni trzni cenu?")) return;
+  try {
+    const result = await api("/control/close_all", { method: "POST" });
+    toast(`Zavreno pozic: ${result.closed}`);
+    refreshPositions(); refreshTrades(); refreshStatus();
+  } catch (e) { toast("Chyba: " + e.message, true); }
+});
+async function closePosition(symbol) {
+  if (!window.confirm(`Zavrit pozici ${symbol} za aktualni trzni cenu?`)) return;
+  try {
+    await api("/control/close_position/" + encodeURIComponent(symbol), { method: "POST" });
+    toast(`Pozice ${symbol} zavrena.`);
+    refreshPositions(); refreshTrades(); refreshStatus();
+  } catch (e) { toast("Chyba: " + e.message, true); }
+}
+
+/* ============================ nacitani dat ============================ */
+async function safe(fn) { try { return await fn(); } catch (e) { if (e.message !== "unauthorized") console.warn(e); return null; } }
+
+const refreshStatus = () => safe(async () => renderStatus(await api("/status")));
+const refreshPositions = () => safe(async () => renderPositions(await api("/positions")));
+const refreshTrades = () => safe(async () => renderTrades(await api("/trades?limit=200")));
+const refreshSignals = () => safe(async () => renderSignals(await api("/signals?limit=100")));
+const refreshEquity = () => safe(async () => renderEquity(await api("/equity_curve?limit=500")));
+const refreshModelStats = () => safe(async () => renderModelStats(await api("/model_stats")));
+const refreshSettings = () => safe(async () => {
+  if (!state.schema) state.schema = await api("/settings/schema");
+  state.settings = await api("/settings");
+  renderSettingsForm(state.schema, state.settings);
+});
+
+async function refreshAll() {
+  await Promise.all([refreshStatus(), refreshPositions(), refreshTrades(), refreshEquity(), refreshModelStats()]);
+}
+
+function boot() {
+  refreshAll();
+  refreshSettings();
+  connectWs();
+  setInterval(refreshStatus, 15000);
+  setInterval(refreshPositions, 15000);
+  setInterval(refreshEquity, 60000);
+}
+
+/* ============================ start ============================ */
+(async function init() {
+  if (!state.token) { showGate(); return; }
+  try {
+    await api("/status");
+    hideGate();
+    boot();
+  } catch (e) {
+    showGate(e.message === "unauthorized" ? "Ulozeny token uz neplati." : "Server nedostupny: " + e.message);
+  }
+})();
+</script>
+</body>
+</html>
