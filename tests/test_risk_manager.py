@@ -82,3 +82,32 @@ def test_check_new_entry_allowed_blocks_at_max_positions(settings, storage):
         current_equity=100_000, open_positions_count=settings.max_open_positions, market_open=True
     )
     assert not decision.allowed
+
+
+def test_small_account_cannot_size_expensive_stock(settings, storage):
+    """Ucet 230 USD na akcii za 230 USD: strop 20 % dovoli 0.2 ks -> 0 celych kusu."""
+    rm = RiskManager(settings, storage)
+    assert rm.position_size(equity=230, price=230, atr=0.35) == 0
+    assert not rm.affordable(equity=230, price=230)
+
+
+def test_small_account_can_size_cheap_stock(settings, storage):
+    rm = RiskManager(settings, storage)
+    # strop 20 % z 230 = 46 USD -> akcie za 11 USD se vejde
+    assert rm.affordable(equity=230, price=11)
+    assert rm.position_size(equity=230, price=11, atr=0.04) == 4
+
+
+def test_higher_position_cap_unlocks_expensive_stock(settings, storage):
+    settings.max_position_pct = 1.0
+    rm = RiskManager(settings, storage)
+    assert rm.affordable(equity=230, price=225)
+    assert rm.position_size(equity=230, price=225, atr=0.35) == 1
+
+
+def test_sizing_diagnostics_explains_zero(settings, storage):
+    rm = RiskManager(settings, storage)
+    message = rm.sizing_diagnostics(equity=230, price=230, atr=0.35)
+    assert "230.00" in message
+    assert "46.00" in message  # strop na jednu pozici
+    assert "MAX_POSITION_PCT" in message

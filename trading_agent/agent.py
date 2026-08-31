@@ -40,6 +40,7 @@ from trading_agent.strategy.signal_engine import ALL_ARMS, SignalEngine
 logger = get_logger("agent")
 
 HEARTBEAT_INTERVAL_SECONDS = 300
+ZERO_SIZE_WARN_INTERVAL_SECONDS = 3600
 
 
 class AutonomousTradingAgent:
@@ -62,6 +63,7 @@ class AutonomousTradingAgent:
         self._stream_thread: Optional[threading.Thread] = None
         self._last_persist = 0.0
         self._last_heartbeat = 0.0
+        self._zero_size_warned: dict[str, float] = {}
 
     # ------------------------------------------------------------- setup
     def _log_account(self) -> None:
@@ -86,6 +88,44 @@ class AutonomousTradingAgent:
         if symbol in self.bar_store.symbols():
             return self.bar_store.get(symbol).last_close
         return None
+
+    def _warn_zero_position_size(self, symbol: str, equity: float, price: float, atr: float) -> None:
+        """Signal prosel vsemi filtry, ale vysla nulova velikost pozice. Bez teto
+        hlasky by to vypadalo, ze bot bezi a jen 'nic nedela'. Omezeno na jednu
+        hlasku za hodinu a symbol, aby nezaplavila log."""
+        now = time.monotonic()
+        if now - self._zero_size_warned.get(symbol, 0.0) < ZERO_SIZE_WARN_INTERVAL_SECONDS:
+            return
+        self._zero_size_warned[symbol] = now
+        logger.warning("%s: signal neproveden, vychazi 0 ks. %s", symbol, self.risk.sizing_diagnostics(equity, price, atr))
+
+    def _check_symbol_affordability(self) -> None:
+        """Po startu overi, ze za aktualni equity lze u sledovanych symbolu vubec
+        koupit alespon 1 cely kus (bracket ordery neumi zlomkove akcie)."""
+        try:
+            equity = float(self.broker.get_account().equity)
+        except Exception:
+            return
+
+        unaffordable = []
+        for symbol in self.settings.symbols:
+            price = self._last_known_price(symbol)
+            if price and not self.risk.affordable(equity, price):
+                unaffordable.append(f"{symbol} ({price:.2f} USD)")
+
+        if not unaffordable:
+            return
+
+        cap = equity * self.settings.max_position_pct
+        logger.warning(
+            "Pri equity %.2f USD a MAX_POSITION_PCT=%.0f%% je strop na jednu pozici %.2f USD, "
+            "takze u techto symbolu nelze koupit ani 1 cely kus: %s. "
+            "Bot je bude ignorovat - zvyste MAX_POSITION_PCT, nebo vyberte levnejsi symboly.",
+            equity, self.settings.max_position_pct * 100, cap, ", ".join(unaffordable),
+        )
+        self.events.publish(
+            {"type": "warning", "message": f"Kapital {equity:.2f} USD nestaci na 1 kus: {', '.join(unaffordable)}"}
+        )
 
     # --------------------------------------------------------- live data
     async def _on_bar_async(self, bar: Bar) -> None:
@@ -157,6 +197,7 @@ class AutonomousTradingAgent:
         atr_value = float(feat_row["atr"])
         qty = self.risk.position_size(equity, close_price, atr_value)
         if qty <= 0:
+            self._warn_zero_position_size(symbol, equity, close_price, atr_value)
             return False
 
         stop_price, take_profit_price = self.risk.stop_and_take_profit(close_price, atr_value, signal.direction)
@@ -359,6 +400,7 @@ class AutonomousTradingAgent:
             raise RuntimeError(credentials_error_hint(exc, self.settings)) from exc
         self.orders.sync_open_positions()
         self._seed_history()
+        self._check_symbol_affordability()
 
         self._stream = self.broker.create_stream()
         self._stream.subscribe_bars(self._on_bar_async, *self.settings.symbols)

@@ -56,6 +56,30 @@ class RiskManager:
         qty_by_cap = (equity * self.settings.max_position_pct) / price
         return max(math.floor(min(qty_by_risk, qty_by_cap)), 0)
 
+    def sizing_diagnostics(self, equity: float, price: float, atr: float) -> str:
+        """Vysvetli, proc vysla velikost pozice 0 ks - typicky u malych uctu.
+
+        Bracket ordery na Alpaca neumi zlomkove akcie, takze se vzdy zaokrouhluje
+        dolu na cele kusy; kdyz 1 kus prekroci strop MAX_POSITION_PCT, nevznikne
+        zadny obchod a bez teto hlasky by to vypadalo, ze bot jen "nic nedela".
+        """
+        risk_amount = equity * self.settings.risk_per_trade
+        stop_distance = atr * self.settings.atr_stop_multiplier
+        cap_notional = equity * self.settings.max_position_pct
+        qty_by_risk = risk_amount / stop_distance if stop_distance > 0 else 0.0
+        qty_by_cap = cap_notional / price if price > 0 else 0.0
+        return (
+            f"equity={equity:.2f} USD, cena={price:.2f}, ATR={atr:.4f}: z risku "
+            f"{risk_amount:.2f} USD vychazi {qty_by_risk:.2f} ks, strop {cap_notional:.2f} USD "
+            f"({self.settings.max_position_pct:.0%} equity) dovoli {qty_by_cap:.2f} ks -> po zaokrouhleni "
+            f"na cele kusy 0. Bud zvyste MAX_POSITION_PCT, nebo sledujte symbol, jehoz 1 kus "
+            f"stoji max {cap_notional:.2f} USD."
+        )
+
+    def affordable(self, equity: float, price: float) -> bool:
+        """Lze za dane equity koupit aspon 1 cely kus v ramci limitu na pozici?"""
+        return price > 0 and price <= equity * self.settings.max_position_pct
+
     def stop_and_take_profit(self, entry_price: float, atr: float, direction: int) -> tuple[float, float]:
         stop_distance = atr * self.settings.atr_stop_multiplier
         tp_distance = atr * self.settings.atr_take_profit_multiplier
