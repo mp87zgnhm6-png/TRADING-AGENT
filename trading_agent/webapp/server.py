@@ -20,6 +20,7 @@ from fastapi import APIRouter, Body, Depends, FastAPI, Header, HTTPException, We
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
+from trading_agent import __version__
 from trading_agent.webapp.settings_api import SETTINGS_SCHEMA
 from trading_agent.webapp.supervisor import AgentSupervisor
 
@@ -178,6 +179,17 @@ def create_app(supervisor: AgentSupervisor) -> FastAPI:
         return {"closed": supervisor.agent.manual_close_all()}
 
     app.include_router(router)
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, Any]:
+        """Overeni, ze server bezi - zamerne bez tokenu, aby slo diagnostikovat
+        i bez prihlaseni (nevraci zadne udaje o uctu ani nastaveni)."""
+        return {
+            "status": "ok",
+            "version": __version__,
+            "agent_running": supervisor.is_running(),
+            "dashboard_file": (STATIC_DIR / "index.html").is_file(),
+        }
 
     # ------------------------------------------------------------ websocket
     @app.websocket("/ws")

@@ -18,12 +18,28 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import uvicorn  # noqa: E402
+try:
+    import uvicorn  # noqa: E402
 
-from trading_agent.config import RUNTIME_OVERLAY_PATH, active_overlay_keys, load_settings  # noqa: E402
-from trading_agent.logging_setup import setup_logging  # noqa: E402
-from trading_agent.webapp.server import create_app  # noqa: E402
-from trading_agent.webapp.supervisor import AgentSupervisor  # noqa: E402
+    from trading_agent import __version__  # noqa: E402
+    from trading_agent.config import RUNTIME_OVERLAY_PATH, active_overlay_keys, load_settings  # noqa: E402
+    from trading_agent.logging_setup import setup_logging  # noqa: E402
+    from trading_agent.webapp.server import STATIC_DIR, create_app  # noqa: E402
+    from trading_agent.webapp.supervisor import AgentSupervisor  # noqa: E402
+except ImportError as exc:  # pragma: no cover - diagnostika pri spatne instalaci
+    print("=" * 72)
+    print("  CHYBA: nepodarilo se nacist aplikaci.")
+    print(f"  Detail: {exc}")
+    print()
+    if "uvicorn" in str(exc) or "fastapi" in str(exc):
+        print("  Chybi zavislosti webu. Nainstalujte je:")
+        print("      pip install -r requirements.txt")
+    else:
+        print("  Nejcastejsi pricina: nova verze byla rozbalena PRES starou slozku a nektery")
+        print("  soubor se neprepsal, takze se michaji soubory z ruznych verzi.")
+        print("  Reseni: rozbalte ZIP do NOVE prazdne slozky a prekopirujte si jen .env a data/.")
+    print("=" * 72)
+    raise SystemExit(1) from exc
 
 UVICORN_LOG_LEVELS = {"critical", "error", "warning", "info", "debug", "trace"}
 
@@ -48,8 +64,19 @@ def main() -> int:
     host = args.host or settings.web_host
     port = args.port or settings.web_port
 
+    dashboard_file = STATIC_DIR / "index.html"
+    if not dashboard_file.is_file():
+        print("=" * 72)
+        print("  CHYBA: chybi soubor dashboardu")
+        print(f"      {dashboard_file}")
+        print()
+        print("  Rozbalte ZIP znovu (vcetne slozky trading_agent/webapp/static/),")
+        print("  nejlepe do nove prazdne slozky.")
+        print("=" * 72)
+        return 1
+
     print("=" * 72)
-    print("  Alpaca autonomni samoucici se trading bot - webovy dashboard")
+    print(f"  Alpaca autonomni samoucici se trading bot - webovy dashboard (v{__version__})")
     print(f"  Adresa:  http://{host}:{port}/")
     print(f"  Token:   {settings.web_api_token}")
     print(f"  Rezim:   {'PAPER (virtualni penize)' if settings.alpaca_paper else 'LIVE - SKUTECNE PENIZE'}"
