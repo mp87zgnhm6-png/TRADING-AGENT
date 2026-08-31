@@ -16,7 +16,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.live.stock import StockDataStream
 from alpaca.data.models.bars import Bar
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.requests import StockBarsRequest, StockLatestTradeRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
@@ -222,6 +222,17 @@ class AlpacaBroker:
             # jediny symbol vraci plochy DataFrame
             result[symbols[0]] = df_all[OHLCV_COLUMNS].copy()
         return result
+
+    def get_latest_prices(self, symbols: list[str]) -> dict[str, float]:
+        """Posledni obchodovana cena pro kazdy symbol - pro rychlou kontrolu,
+        co si lze za dostupny kapital vubec dovolit."""
+        try:
+            request = StockLatestTradeRequest(symbol_or_symbols=symbols, feed=self._feed)
+            trades = self.data.get_stock_latest_trade(request)
+        except APIError as exc:
+            logger.error("Nepodarilo se ziskat aktualni ceny: %s", exc)
+            return {}
+        return {symbol: float(trade.price) for symbol, trade in trades.items() if trade is not None}
 
     # -------------------------------------------------------------- stream
     def create_stream(self) -> StockDataStream:

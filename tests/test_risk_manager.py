@@ -111,3 +111,22 @@ def test_sizing_diagnostics_explains_zero(settings, storage):
     assert "230.00" in message
     assert "46.00" in message  # strop na jednu pozici
     assert "MAX_POSITION_PCT" in message
+
+
+def test_max_affordable_shares_floors_to_whole_shares():
+    from trading_agent.risk.risk_manager import max_affordable_shares
+
+    # strop 20 % z 230 = 46 USD
+    assert max_affordable_shares(230, 11.20, 0.2) == 4   # 44.80 USD
+    assert max_affordable_shares(230, 44.50, 0.2) == 1
+    assert max_affordable_shares(230, 46.00, 0.2) == 1   # presne na strop
+    assert max_affordable_shares(230, 46.01, 0.2) == 0   # o cent nad strop
+    assert max_affordable_shares(230, 560.00, 0.2) == 0  # SPY
+
+
+def test_max_affordable_shares_handles_invalid_inputs():
+    from trading_agent.risk.risk_manager import max_affordable_shares
+
+    assert max_affordable_shares(0, 10, 0.2) == 0
+    assert max_affordable_shares(230, 0, 0.2) == 0
+    assert max_affordable_shares(-5, 10, 0.2) == 0

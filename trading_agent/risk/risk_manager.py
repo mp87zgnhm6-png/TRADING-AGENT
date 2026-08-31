@@ -37,6 +37,18 @@ class RiskDecision:
     reason: str = ""
 
 
+def max_affordable_shares(equity: float, price: float, max_position_pct: float) -> int:
+    """Kolik celych kusu se vejde do limitu na jednu pozici.
+
+    Bracket ordery na Alpaca neumi zlomkove akcie, takze se vzdy zaokrouhluje dolu -
+    u malych uctu to znamena, ze akcie drazsi nez `equity * max_position_pct`
+    nejde koupit vubec.
+    """
+    if equity <= 0 or price <= 0:
+        return 0
+    return int((equity * max_position_pct) // price)
+
+
 class RiskManager:
     def __init__(self, settings: Settings, storage: Storage):
         self.settings = settings
@@ -78,7 +90,7 @@ class RiskManager:
 
     def affordable(self, equity: float, price: float) -> bool:
         """Lze za dane equity koupit aspon 1 cely kus v ramci limitu na pozici?"""
-        return price > 0 and price <= equity * self.settings.max_position_pct
+        return max_affordable_shares(equity, price, self.settings.max_position_pct) >= 1
 
     def stop_and_take_profit(self, entry_price: float, atr: float, direction: int) -> tuple[float, float]:
         stop_distance = atr * self.settings.atr_stop_multiplier

@@ -65,7 +65,8 @@ scripts/
 ├── run_web.py        agent + webovy dashboard (doporucene spousteni)
 ├── run_live.py       jen agent, bez webu (headless provoz)
 ├── run_backtest.py   backtest nad historickymi daty
-└── bootstrap_train.py "zahrivaci" beh - predtrenuje model/bandit pred prvnim startem
+├── bootstrap_train.py "zahrivaci" beh - predtrenuje model/bandit pred prvnim startem
+└── suggest_symbols.py vybere symboly, ktere se vejdou do kapitalu na uctu
 ```
 
 ### Tok dat za behu
@@ -213,6 +214,37 @@ zmrazilo tehdejsi obsah `.env` (vcetne API klicu) a pozdejsi oprava `.env` by
 se uz neprojevila. Co prave prebiji `.env`, vypise agent pri startu do logu;
 smazanim `data/runtime_settings.json` se vratite plne k `.env` (vygeneruje se
 novy pristupovy token).
+
+## Maly ucet (stovky dolaru)
+
+Bracket ordery na Alpaca neumi zlomkove akcie, takze velikost pozice se vzdy
+zaokrouhluje dolu na cele kusy. Z toho plyne tvrde pravidlo:
+
+> **1 cely kus musi stat max `equity * MAX_POSITION_PCT`.**
+
+Pri kapitalu 230 USD a vychozim `MAX_POSITION_PCT=0.2` je strop na jednu pozici
+46 USD - drahe tituly (SPY, MSFT, AAPL) by tedy neotevrely **zadnou** pozici.
+Agent na to upozorni hned po startu i pri kazdem zablokovanem vstupu, ale
+symboly je potreba vybrat podle kapitalu:
+
+```bash
+python scripts/suggest_symbols.py                 # podle skutecne equity z uctu
+python scripts/suggest_symbols.py --equity 230    # nebo pro konkretni castku
+```
+
+Skript stahne aktualni ceny z Alpaca, spocita kolik kusu se vejde do limitu a
+vypise hotovy radek `SYMBOLS=` k vlozeni do `.env` nebo do dashboardu. Po zmene
+symbolu je potreba restartovat agenta (tlacitko v dashboardu).
+
+Dalsi dve veci, ktere u malych uctu plati bez ohledu na tento software:
+
+- **Typ uctu.** Margin ucet vyzaduje u brokera min. 2 000 USD, takze ucet za
+  stovky dolaru je zpravidla **cash**. Na cash uctu neplati PDT limit (max. 3
+  day trades za 5 dni), zato se penize z prodeje zuctovavaji az druhy pracovni
+  den (T+1) - realne tak zvladnete radove jeden obchodni cyklus denne z plne
+  castky. Typ uctu si overte primo v Alpaca dashboardu.
+- **Backtest s realnou castkou.** `python scripts/run_backtest.py --equity 230`,
+  jinak backtest pocita s vychozimi 100 000 USD a vysledky nebudou porovnatelne.
 
 ## Reseni problemu
 
