@@ -18,13 +18,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from trading_agent.agent import AutonomousTradingAgent  # noqa: E402
-from trading_agent.config import load_settings  # noqa: E402
+from trading_agent.config import RUNTIME_OVERLAY_PATH, active_overlay_keys, load_settings  # noqa: E402
 from trading_agent.logging_setup import setup_logging  # noqa: E402
 
 
 def main() -> int:
     settings = load_settings()
     logger = setup_logging(settings)
+
+    overridden = active_overlay_keys()
+    if overridden:
+        logger.info(
+            "Nastaveni ulozena z dashboardu (%s) prebijeji .env: %s",
+            RUNTIME_OVERLAY_PATH, ", ".join(overridden),
+        )
 
     if not settings.alpaca_api_key or not settings.alpaca_secret_key:
         logger.error(

@@ -21,9 +21,10 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+from alpaca.common.exceptions import APIError
 from alpaca.data.models.bars import Bar
 
-from trading_agent.broker.alpaca_client import AlpacaBroker
+from trading_agent.broker.alpaca_client import AlpacaBroker, credentials_error_hint
 from trading_agent.config import Settings
 from trading_agent.data.bar_buffer import MultiSymbolBarStore
 from trading_agent.data.storage import Storage
@@ -350,7 +351,12 @@ class AutonomousTradingAgent:
             "PAPER" if self.settings.alpaca_paper else "LIVE", self.settings.dry_run, self.settings.symbols,
         )
         self._stop_event.clear()
-        self._log_account()
+        try:
+            self._log_account()
+        except APIError as exc:
+            # spatne pristupove udaje nejsou docasna chyba - misto tracebacku
+            # posilame konkretni navod (zobrazi se i v dashboardu jako last_error)
+            raise RuntimeError(credentials_error_hint(exc, self.settings)) from exc
         self.orders.sync_open_positions()
         self._seed_history()
 

@@ -29,7 +29,7 @@ from alpaca.trading.requests import (
     TakeProfitRequest,
 )
 
-from trading_agent.config import Settings
+from trading_agent.config import RUNTIME_OVERLAY_PATH, Settings
 from trading_agent.logging_setup import get_logger
 
 logger = get_logger("broker")
@@ -43,6 +43,40 @@ def _feed(settings: Settings) -> DataFeed:
     except ValueError:
         logger.warning("Neznamy DATA_FEED=%s, pouzivam IEX.", settings.data_feed)
         return DataFeed.IEX
+
+
+def _mask_key(key: str) -> str:
+    if not key:
+        return "(prazdny)"
+    return f"{key[:4]}...{key[-4:]} (delka {len(key)})" if len(key) > 10 else f"(delka {len(key)})"
+
+
+def credentials_error_hint(exc: APIError, settings: Settings) -> str:
+    """Prelozi odmitnuti od Alpaca API na konkretni navod, co zkontrolovat.
+
+    401/403 na /v2/account neni vypadek site ani docasna chyba - jsou to spatne
+    pristupove udaje, a nejcastejsi pricinou je zamena PAPER a LIVE klicu.
+    """
+    status = getattr(exc, "status_code", None)
+    if status not in (401, 403):
+        return f"Alpaca API odmitla overeni uctu: {exc}"
+
+    account_type = "paper" if settings.alpaca_paper else "live"
+    endpoint = "paper-api.alpaca.markets" if settings.alpaca_paper else "api.alpaca.markets"
+    lines = [
+        f"Alpaca odmitla pristupove udaje (HTTP {status}) na {endpoint}.",
+        f"Pouzity API key: {_mask_key(settings.alpaca_api_key)}, "
+        f"secret: {'vyplnen' if settings.alpaca_secret_key else 'PRAZDNY'}.",
+        "Co zkontrolovat:",
+        f"  1) ALPACA_PAPER={str(settings.alpaca_paper).lower()}, takze musite pouzit klice vygenerovane "
+        f"pro {account_type.upper()} ucet - paper a live ucet maji ODLISNE klice "
+        "(paper klice zpravidla zacinaji 'PK', live 'AK').",
+        "  2) Key i secret jsou zkopirovane cele, bez mezer a uvozovek (secret Alpaca zobrazi jen jednou).",
+        "  3) Klice nebyly na app.alpaca.markets regenerovane nebo smazane.",
+        f"  4) Hodnoty ulozene z dashboardu ({RUNTIME_OVERLAY_PATH}) maji prednost pred .env - "
+        "pokud jste klice zadavali tam, opravte je tamtez, nebo soubor smazte.",
+    ]
+    return "\n".join(lines)
 
 
 class AlpacaBroker:

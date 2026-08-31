@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import uvicorn  # noqa: E402
 
-from trading_agent.config import load_settings  # noqa: E402
+from trading_agent.config import RUNTIME_OVERLAY_PATH, active_overlay_keys, load_settings  # noqa: E402
 from trading_agent.logging_setup import setup_logging  # noqa: E402
 from trading_agent.webapp.server import create_app  # noqa: E402
 from trading_agent.webapp.supervisor import AgentSupervisor  # noqa: E402
@@ -60,6 +60,13 @@ def main() -> int:
         print("  muze menit risk limity i zavirat pozice - postavte pred nej HTTPS reverse")
         print("  proxy a token drzte v tajnosti.")
         print("=" * 72)
+
+    overridden = active_overlay_keys()
+    if overridden:
+        logger.info(
+            "Nastaveni ulozena z dashboardu (%s) prebijeji .env: %s",
+            RUNTIME_OVERLAY_PATH, ", ".join(overridden),
+        )
 
     if not settings.alpaca_api_key or not settings.alpaca_secret_key:
         logger.warning(

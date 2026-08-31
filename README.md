@@ -201,6 +201,39 @@ Vsechny parametry jsou v `.env` (vzor v `.env.example`), mimo jine:
 
 Vetsinu z nich lze menit i za behu primo v dashboardu (zalozka *Nastaveni*).
 
+### Odkud se nastaveni bere (dve vrstvy)
+
+1. **`.env`** - zaklad, ktery plati vzdy.
+2. **`data/runtime_settings.json`** - jen ty polozky, ktere jste **explicitne
+   ulozili v dashboardu** (plus automaticky vygenerovany `WEB_API_TOKEN`).
+   Tyto hodnoty maji prednost pred `.env`.
+
+Zamerne se tedy neuklada kompletni kopie nastaveni - jinak by prvni spusteni
+zmrazilo tehdejsi obsah `.env` (vcetne API klicu) a pozdejsi oprava `.env` by
+se uz neprojevila. Co prave prebiji `.env`, vypise agent pri startu do logu;
+smazanim `data/runtime_settings.json` se vratite plne k `.env` (vygeneruje se
+novy pristupovy token).
+
+## Reseni problemu
+
+**`APIError: {"message": "unauthorized."}` / HTTP 401 na `/v2/account`**
+
+Alpaca odmitla pristupove udaje. Agent to od verze s dashboardem hlasi
+konkretnim navodem misto tracebacku; projdete postupne:
+
+1. **Paper a live ucet maji ODLISNE klice.** Pri `ALPACA_PAPER=true` musite
+   pouzit klice vygenerovane pro *paper* ucet na app.alpaca.markets (paper
+   klice zpravidla zacinaji `PK`, live `AK`). Nejcastejsi pricina.
+2. Key i secret jsou zkopirovane cele, bez mezer a uvozovek. Secret Alpaca
+   zobrazi jen jednou pri vytvoreni - pokud ho nemate, vygenerujte novy par.
+3. Klice nebyly mezitim na Alpaca regenerovane nebo smazane.
+4. Zkontrolujte `data/runtime_settings.json` - pokud jste klice zadavali v
+   dashboardu, maji prednost pred `.env`. Opravte je tamtez, nebo soubor smazte.
+
+**Agent nebezi, dashboard ale funguje** - podivejte se na `last_error` v hlavicce
+dashboardu (a do `data/logs/trading_agent.log`); po oprave nastaveni staci
+kliknout na *Spustit agenta*, restart procesu neni potreba.
+
 ## Testovani
 
 ```bash

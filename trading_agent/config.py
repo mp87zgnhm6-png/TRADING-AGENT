@@ -12,7 +12,7 @@ import json
 import logging
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +20,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 logger = logging.getLogger("trading_agent.config")
 
 RUNTIME_OVERLAY_PATH = Path("data/runtime_settings.json")
+OVERLAY_VERSION = 2
+_VERSION_KEY = "_version"
+
+# Nastaveni, ktera pri poslednim `load_settings()` prebila hodnoty z `.env`.
+_ACTIVE_OVERLAY_KEYS: list[str] = []
 
 
 class Settings(BaseSettings):
@@ -117,45 +122,101 @@ def _read_overlay() -> dict:
     if not RUNTIME_OVERLAY_PATH.exists():
         return {}
     try:
-        return json.loads(RUNTIME_OVERLAY_PATH.read_text(encoding="utf-8"))
+        data = json.loads(RUNTIME_OVERLAY_PATH.read_text(encoding="utf-8"))
     except Exception as exc:
-        logger.warning("Poskozeny %s (%s), ignoruji ulozene zmeny z webu.", RUNTIME_OVERLAY_PATH, exc)
+        logger.warning("Poskozeny %s (%s), ignoruji ulozene zmeny z dashboardu.", RUNTIME_OVERLAY_PATH, exc)
         return {}
 
+    if not isinstance(data, dict):
+        logger.warning("Neocekavany obsah %s, ignoruji ho.", RUNTIME_OVERLAY_PATH)
+        return {}
 
-def persist_settings_overlay(settings: Settings) -> None:
-    """Ulozi aktualni nastaveni na disk, aby zmeny z webu prezily restart procesu.
+    if data.get(_VERSION_KEY) != OVERLAY_VERSION:
+        data = _migrate_legacy_overlay(data)
+
+    return {k: v for k, v in data.items() if k != _VERSION_KEY}
+
+
+def _migrate_legacy_overlay(data: dict) -> dict:
+    """Prevede stary format overlaye (kompletni kopie vsech nastaveni) na novy.
+
+    Stary format zmrazil obsah `.env` z okamziku prvniho spusteni a od te chvile
+    ho prebijel - typicky to znamenalo, ze oprava ALPACA_API_KEY v `.env` nemela
+    zadny efekt a Alpaca vracela 401. Ze snapshotu nelze poznat, co uzivatel
+    zamerne zmenil v dashboardu a co je jen kopie `.env`, proto se zachova pouze
+    vygenerovany pristupovy token a zbytek se vraci do rezie `.env`.
+    """
+    kept = {k: v for k, v in data.items() if k == "WEB_API_TOKEN" and v}
+    dropped = sorted(k for k in data if k not in kept and k != _VERSION_KEY)
+    _write_overlay(kept)
+    logger.warning(
+        "Soubor %s byl ve starem formatu a prebijel hodnoty z .env (%s). Byl migrovan - "
+        "nadale plati .env a jen zmeny, ktere ulozite v dashboardu.",
+        RUNTIME_OVERLAY_PATH,
+        ", ".join(dropped) or "zadne polozky",
+    )
+    return kept
+
+
+FIELD_ALIASES: dict[str, str] = {name: (f.alias or name) for name, f in Settings.model_fields.items()}
+
+
+def _write_overlay(data: dict) -> None:
+    RUNTIME_OVERLAY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {_VERSION_KEY: OVERLAY_VERSION, **data}
+    tmp = RUNTIME_OVERLAY_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(RUNTIME_OVERLAY_PATH)
+
+
+def persist_settings_overlay(settings: Settings, changed: Iterable[str]) -> None:
+    """Ulozi do overlay souboru POUZE explicitne zmenena pole.
+
+    Zamerne se neuklada kompletni snapshot nastaveni: kdyby se ukladalo vsechno,
+    prvni spusteni by zmrazilo tehdejsi obsah `.env` (vcetne API klicu) a
+    jakakoli pozdejsi oprava `.env` by se uz neprojevila. Overlay tedy drzi jen
+    to, co uzivatel opravdu zmenil v dashboardu; vse ostatni zustava v rezii `.env`.
 
     Soubor je v .gitignore stejne jako .env - muze obsahovat i API klice zadane
     pres webove rozhrani.
     """
-    RUNTIME_OVERLAY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = RUNTIME_OVERLAY_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(settings.model_dump(by_alias=True), indent=2), encoding="utf-8")
-    tmp.replace(RUNTIME_OVERLAY_PATH)
+    overlay = _read_overlay()
+    dumped = settings.model_dump(by_alias=True)
+    for name in changed:
+        alias = FIELD_ALIASES.get(name, name)
+        if alias in dumped:
+            overlay[alias] = dumped[alias]
+    _write_overlay(overlay)
+
+
+def active_overlay_keys() -> list[str]:
+    """Nastaveni, ktera aktualne prebijeji `.env` (zmeny ulozene z dashboardu)."""
+    return sorted(_ACTIVE_OVERLAY_KEYS)
 
 
 def load_settings() -> Settings:
-    """Nacte .env a preklopi pres nej ulozene zmeny z weboveho rozhrani (pokud existuji)."""
+    """Nacte `.env` a preklopi pres nej zmeny ulozene z weboveho rozhrani."""
+    global _ACTIVE_OVERLAY_KEYS
+
     settings = Settings()
     overlay = _read_overlay()
+    _ACTIVE_OVERLAY_KEYS = []
     if overlay:
         merged = settings.model_dump(by_alias=True)
         merged.update(overlay)
         try:
             settings = Settings(**merged)
+            _ACTIVE_OVERLAY_KEYS = list(overlay.keys())
         except Exception as exc:
-            logger.warning("Ulozene zmeny z webu neprosly validaci (%s), pouzivam jen .env.", exc)
+            logger.warning("Ulozene zmeny z dashboardu neprosly validaci (%s), pouzivam jen .env.", exc)
 
     if not settings.web_api_token:
         settings.web_api_token = secrets.token_urlsafe(24)
-        persist_settings_overlay(settings)
+        persist_settings_overlay(settings, ["web_api_token"])
+        _ACTIVE_OVERLAY_KEYS = sorted({*_ACTIVE_OVERLAY_KEYS, "WEB_API_TOKEN"})
 
     settings.ensure_directories()
     return settings
-
-
-FIELD_ALIASES: dict[str, str] = {name: (f.alias or name) for name, f in Settings.model_fields.items()}
 
 
 def apply_settings_update(current: Settings, updates: dict[str, Any]) -> Settings:
@@ -179,5 +240,6 @@ def apply_settings_update(current: Settings, updates: dict[str, Any]) -> Setting
         setattr(current, name, getattr(validated, name))
 
     current.ensure_directories()
-    persist_settings_overlay(current)
+    # do overlaye jde jen to, co uzivatel skutecne zmenil - zbytek nadale ridi .env
+    persist_settings_overlay(current, updates.keys())
     return current
